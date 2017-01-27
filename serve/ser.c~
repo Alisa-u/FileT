@@ -1,0 +1,58 @@
+#include <stdio.h>
+#include <unistd.h>
+#include <assert.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <pthread.h>
+void *fun(void * arg)//在线程中进行读写，即使有一个客户端阻塞在recv，它也不会影响另一个线程的执行路径继续运行
+{
+	int c=(int)arg;
+	while(1)
+		{
+			char buff[128]={0};
+			//read(c,buff,127);
+			//if(recv(c,buff,1,0)<=0)//流式的特点：发送和接受的个数未必相等
+			if(recv(c,buff,127,0)<=0)//0是一个标志位，几级数据。反复读取数据 直到客户端关闭链接，直到客户端关闭再处理下一个客户端。 如果又开启了另一个客户端，而第一个客户端并没有关闭，所以服务器阻塞在recv中，第二个客户端链接成功，数据也放入了缓冲区，第二个客户端阻塞在read  但是服务器由于阻塞无法处理第二个客户端。如果第一个客户端一关闭。第二个客户端就会立即别处理。
+			{
+				break;
+			}
+			else
+			{
+				printf("read=%s\n",buff);
+				send(c,"OK",2,0);			
+			}
+		}
+	close(c);
+}
+int main()
+{
+	int sockfd=socket(AF_INET,SOCK_STREAM,0);//int socket(int domain, int type, int protocol);domain是协议； tcp是SOCK_STREAM udp是SOCK_DGRAM；protocol是0 
+	// 返回值是一个描述附ipv4用的协议族是AF_INET
+	struct sockaddr_in saddr,caddr;//专用的套接字地址
+	memset(&saddr,0,sizeof(saddr));//将saddr整体置空（因为后面有几个占位的成员），再将其需要部分赋值
+	saddr.sin_family=AF_INET;// 遵守的协议
+	saddr.sin_port=htons(6500);//端口号 端口用网络字节序列（大端），我们主机传进去的不知道是大端还是小端，所以要将它转为网络字节序列是大端。 5000一下都不能被我们使用
+	saddr.sin_addr.s_addr = inet_addr("127.0.0.1");//主机
+
+	int res=bind(sockfd,(struct sockaddr*)&saddr,sizeof(saddr));//bind绑定是命名套接子，将专用套接字转成通用套接字  如果端口号被占用，执行就会失败，或者普通用户使用端口号小于1024的端口
+	assert(res!=-1);
+
+	listen(sockfd,5);//创建监听队列 int listen(int sockfd, int backlog);监听链接如果没有就会阻塞住
+	while(1)
+	{
+		int len=sizeof(caddr);
+		int c=accept(sockfd,(struct sockaddr*)&caddr,&len);//len传一个指针的原因是因为要接收一个东西，首先得知道它有多大，要提供存储ip和端口的空间有多大，将对方的信息写到caddr中
+		if(c<0)//c是一个描述附，所以它肯定不会小于0
+		{
+			perror("accept error");
+			continue;
+		}	
+		pthread_t id;
+		pthread_create(&id,NULL,fun,(void*)c);//只要产生新的描述附就去创建新的线程create
+			
+	}
+}
+ 

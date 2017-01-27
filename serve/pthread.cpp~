@@ -1,0 +1,31 @@
+#include "Thread1.h"
+#include <iostream>
+#include <cstdio>
+#include <cstdlib>
+#include <typeinfo>
+using namespace std;
+pthread_mutex_t CThreadPoolChunk::m_pthreadMutex = PTHREAD_MUTEX_INITIALIZER; //静态初始化
+pthread_cond_t CThreadPoolChunk::m_pthreadCond = PTHREAD_COND_INITIALIZER;
+
+CThreadPool::CThreadPoolS(int threadNum)
+{
+	this->m_iThreadNum = threadNum;
+	cout << "Create ThreadNum" << threadNum << " threads" << endl;
+	Create();
+}
+CThreadPool::Create()
+{
+	pthread_t id[m_iThreadNum];
+	int i=0;	
+	for(;i<NFDS;++i)
+	{
+		pthread_create(&id[i],NULL,work_thread,(void *)head);//创建了三个线程
+	}
+	return 0;
+}
+
+static void* ThreadFunc(void * threadData);
+{
+	pthread_t tid = pthread_self();
+}
+

@@ -1,0 +1,247 @@
+#include <stdio.h>
+#include <iostream>
+#include "list.h"
+#include <unistd.h>
+#include <assert.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <sys/sendfile.h>
+using namespace std;
+#define   CMD          1
+#define   GETFILE      2
+#define   PUTFILE      3
+#define   EXIT         4
+#define   CD           5
+
+int get_cmd(char *str)
+{
+	if(strcmp(str,"exit")==0)
+	{
+		return EXIT;
+	}
+	else if(strcmp(str,"get")==0)
+	{
+		return GETFILE;
+	}
+	else if(strcmp(str,"put")==0)
+	{
+		return PUTFILE;
+	}
+	else
+	{
+		return CMD;
+	}
+}
+
+void sendtoserve(Node *head,int sockfd)
+{
+	if(head==NULL)
+	{
+		return;
+	}
+	char sendbuff[521]={0};
+	int maxnode=Getcount_list(head);//插入链表中的结点个数
+	int i=0;
+	for(;i<maxnode;++i)
+	{
+		strcpy(sendbuff,Getstr_list(head,i));//将一个个的结点放到sendbuff中，以#分隔 :cp#main.c#test.c   ls#    
+		strcat(sendbuff,"#");
+	}
+
+	if(strncmp(sendbuff,"ls",2)==0)//判断如果sendbuff的前两个字符是ls，就给它加上--color，以确定它可以在ls时有颜色显示
+	{
+		strcat(sendbuff,"--color");
+	}
+
+	send(sockfd,sendbuff,strlen(sendbuff),0);//将sendbuff发送个客户端
+	char recvbuff[521]={0};
+	int n=recv(sockfd,recvbuff,521,0);//接受来自服务器的
+	
+	if(n==0)
+	{
+		printf("serve close");
+		return;
+	}
+	char *p=strtok(recvbuff,"#");
+	if(p==NULL)
+	{
+		printf("recv error\n");
+		return;
+	}
+	if(strcmp(p,"0")==0)
+	{
+		
+		p=strtok(NULL,"#");
+		//printf("***%s\n",sendbuff);
+		if(strncmp(sendbuff,"ls",2)==0)//将ls打印出来的内容打印成一行
+		{
+			char *s=p;
+			while(*s!='\0')
+			{
+				if(*s=='\n')
+				{
+					*s=' ';
+				}
+				s++;
+			}
+			
+		}
+		printf("%s\n",p);
+			return;
+		
+	}
+	else if(strcmp(p,"1")==0)//如果是1，则不做任何处理返回
+	{
+		return;
+	}
+	else
+	{
+		printf("recv data error");
+	}
+	return;
+}
+
+void getfile(Node *head,int sockfd)//get sem.c
+{
+	if(head==NULL)
+	{
+		return;
+	}
+	char sendbuff[521]={0};
+	int maxnode=Getcount_list(head);//插入链表中的结点个数
+	int i=0;
+	//printf("%s\n",Getstr_list(head,0));
+	//printf("%s\n",Getstr_list(head,1));
+	for(;i<maxnode;++i)
+	{
+		strcat(sendbuff,Getstr_list(head,i));//将一个个的结点放到sendbuff中，以#分隔:get#sem.c#
+		strcat(sendbuff,"#");
+	}
+	printf("sendbuff=%s\n",sendbuff);//调试信息
+	send(sockfd,sendbuff,strlen(sendbuff),0);//将  get#sem.c#   发送到服务器
+	
+	int fd=open(Getstr_list(head,1),O_WRONLY|O_CREAT,0600);//打开或者创建sem.c文件
+	assert(fd!=-1);
+	int pipefd[2];
+	pipe(pipefd);//创建管道
+	while(1)
+	{
+		char recvbuff[256]={0};
+		int length=0;
+		int l=recv(sockfd,&length,4,0);//接收来自服务器中收到的文件大小
+		printf("%d\n",length);//调试信息
+		int n=splice(sockfd,NULL,pipefd[1],NULL,length,0);//将这些信息按length长度从sockfd描述附上拷到pipefd[1]写中	
+		if(n==0)
+		{
+			continue;
+		}
+		splice(pipefd[0],NULL,fd,NULL,n,0);//将这些从管道的读端读到fd文件中
+		break;	
+	}
+}
+
+void putfile(Node*head,int sockfd)//put a.c
+{
+	if(head==NULL)
+	{
+		return;
+	}
+	char sendbuff[2014]={0};
+	int maxnode=Getcount_list(head);
+	int i=0;
+	//printf("%s\n",Getstr_list(head,0));
+	//printf("%s\n",Getstr_list(head,1));
+	for(;i<maxnode;++i)
+	{
+		strcat(sendbuff,Getstr_list(head,i));//put#a.c#
+		strcat(sendbuff,"#");
+	}
+
+	printf("sendbuff=%s\n",sendbuff);//调试信息
+	send(sockfd,sendbuff,strlen(sendbuff),0);//将put#a.c#发送给serve
+
+	
+	int fp=open(Getstr_list(head,1),O_RDONLY);//打开a.c
+	struct stat stat;//stat是一个结构体
+	fstat(fp,&stat);
+	int length=(int)stat.st_size;//获取文件的大小，这个中的stat.st_size是偏移量，把它转成int
+
+	printf("%d\n",length);
+	
+	send(sockfd,&length,sizeof(int),0);//将这个文件（sem.c）的大小发给client
+	//ssize_t send(int sockfd, const void *buf, size_t len, int flags);
+	
+	while(sendfile(fd,fp,NULL,521)>0)//sendfile函数在两个文件描述附直接传递数据（完全在内核中操作），从而避免了内核缓冲区和用户缓冲区之间的数据拷贝，从fp拷贝到fd上，只要fp上有数据，就会一直拷贝。
+	//ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count);
+	{;}
+}
+
+int main()
+{
+	int sockfd=socket(AF_INET,SOCK_STREAM,0);
+	assert(sockfd!=-1);
+
+	struct sockaddr_in saddr;
+	memset(&saddr,sizeof(saddr),0);
+	saddr.sin_family=AF_INET;//地址族
+	saddr.sin_port=htons(6500);//用和服务器一样的端口号.6500指的是要链接的服务器是6500，客户端的端口号是随机分配
+	saddr.sin_addr.s_addr = inet_addr("127.0.0.1");	
+	
+	int res=connect(sockfd,(struct sockaddr*)&saddr,sizeof(saddr));
+	assert(res!=-1);
+	
+	Node *head=NULL;
+	Init_list(&head);//初始化链表
+	while(1)
+	{
+		printf("Connect:127.0.0.1>>]$");
+		fflush(stdout);
+		char buff[128]={0};
+		fgets(buff,128,stdin);
+		buff[strlen(buff)-1]=0;//去掉\n给就是给它的位赋值成0就行
+		char *ptr=strtok(buff," ");//cp main.c test.c
+		if(ptr==NULL)
+		{
+			continue;
+		}
+		Add_list(head,ptr);//cp main.c test.c将它们按“ ”截取分别放到链表里  ls     get sem.c(下载)     put a.c（上传）
+		while((ptr=strtok(NULL,""))!=NULL)
+		{
+			Add_list(head,ptr);
+		}
+		int val=get_cmd(Getstr_list(head,0));
+		switch(val)//选择是命令  下载文件   退出   上传文件
+		{
+			case CMD:
+				sendtoserve(head,sockfd);
+					break;
+			case GETFILE:
+				getfile(head,sockfd);
+					break;
+			case EXIT:
+				Destroy_list(head);
+				exit(0);
+					break;
+			case PUTFILE:
+				putfile(head,sockfd);
+		}
+		 Clean_list(head);
+	}
+	close(sockfd);
+}
+
+
+
+
+
+
+
+
+

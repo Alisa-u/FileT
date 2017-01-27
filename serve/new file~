@@ -1,0 +1,134 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <assert.h>
+#include <pthread.h>
+#include "sem.h"
+#include "list.h"
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#define NFDS 3
+
+void* work_thread(void *arg)
+{
+	Node *head=(Node *)arg;
+	while(1)
+	{
+		sem_p();
+		int fd=Getc_list(head);
+		if(fd==-1)
+		{
+			continue;
+		}
+		printf("pthread beging...");
+		while(1)
+		{
+			char *myargv[10]={0};
+			char recvbuff[128]={0};
+			if(recv(fd,recvbuff,127,0)==0)
+			{
+				break;
+			}
+			char *ptr,*pstr;
+			ptr=strtok_r(recvbuff,"#",&pstr);
+			//char *strtok_r(char *str, const char *delim, char **saveptr);
+			if(ptr==NULL)
+			{
+				continue;
+			}
+			myargv[0]=ptr;
+			int i=1;
+			while((ptr=strtok_r(recvbuff,"#",&pstr))!=NULL)
+			{
+				myargv[i++]=ptr;
+			}
+			int pipefd[2];
+			pipe(pipefd);
+
+			pid_t pid=fork();
+			
+			if(pid==0)
+			{
+				dup2(pipefd[1],1);
+				dup2(pipefd[1],2);
+				execvp(myargv[0],myargv);
+				perror("execvp error");
+				exit(0);
+			}
+			else
+			{
+				close(pipefd[1]);
+				wait(NULL);
+				char readbuff[521]={0};		
+				if(read(pipefd[0],readbuff+2,521)==0)
+				{
+					strncpy(readbuff,"1#",2);
+				}
+				else
+				{
+					strncpy(readbuff,"0#",2);
+				}
+				printf("%s\n",readbuff);
+				send(fd,readbuff,strlen(readbuff),0);
+			}
+		}
+	}
+}
+void create_thread(Node *head)//创建线程池
+{
+	pthread_t id[NFDS];
+	int i=0;	
+	for(;i<NFDS;++i)
+	{
+		pthread_create(&id[i],NULL,work_thread,(void *)head);//创建了三个线程
+//pthread_create(&id,NULL,fun,(void*)c);//只要产生新的描述附就去创建新的线程create
+	}
+
+}
+int main()
+{
+	int sockfd=socket(AF_INET,SOCK_STREAM,0);
+	assert(sockfd!=-1);
+
+	struct sockaddr_in saddr;
+	memset(&saddr,0,sizeof(saddr));
+	saddr.sin_family=AF_INET;
+	saddr.sin_port=htons(6500);
+	saddr.sin_addr.s_addr=inet_addr("127.0.0.1");
+
+	int res=bind(sockfd,(struct sockaddr*)&saddr,sizeof(saddr));
+	assert(res!=-1);
+
+	listen(sockfd,5);
+	Node *head=NULL;
+	Init_list(&head);
+
+	sem_init();
+	create_thread(head);
+	while(1)
+	{
+		struct sockaddr_in caddr;
+		int len=sizeof(caddr);
+		int c=accept(sockfd,(struct sockaddr*)&saddr,&len);
+		if(c<0)
+		{
+			continue;
+			printf("client close");
+		}
+		printf("client begin");
+		Add_list(head,c);
+		sem_v();
+	}
+}
+
+
+
+
+
+
+
+
+
+

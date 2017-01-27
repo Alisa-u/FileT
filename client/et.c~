@@ -1,0 +1,115 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <assert.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <sys/epoll.h>
+#include <fcntl.h>
+
+void setnonblock(int fd)
+{
+	int oldfd=fcntl(fd,F_GETFL,);
+	int newfd=oldfd | )_
+}
+
+void epoll_add(int epfd,int fd)
+{
+	struct epoll_event ev;
+	ev.events = EPOLLIN;
+	ev.data.fd = fd;
+
+	if( epoll_ctl(epfd,EPOLL_CTL_ADD,fd,&ev) == -1 )//对事件表的操作是添加事件
+	{
+		perror("eopll_ctl add error\n");
+	}
+}
+
+void epoll_del(int epfd,int fd)//对事件表的操作是删除事件
+{
+	if( epoll_ctl(epfd,EPOLL_CTL_DEL,fd,NULL) == -1 )
+	{
+		perror("eopll_ctl del error\n");
+	}
+
+}
+
+int main()
+{
+	int sockfd=socket(AF_INET,SOCK_STREAM,0);
+	assert( sockfd != -1 );
+        
+	struct sockaddr_in saddr,caddr;//专用的套接字地址
+	memset(&saddr,0,sizeof(saddr));//将saddr整体置空（因为后面有几个占位的成员），再将其需要部分赋值
+	saddr.sin_family=AF_INET;// 遵守的协议
+	saddr.sin_port=htons(6500);
+	saddr.sin_addr.s_addr = inet_addr("127.0.0.1");//主机
+
+	int res=bind(sockfd,(struct sockaddr*)&saddr,sizeof(saddr));
+        //bind绑定是命名套接子，将专用套接字转成通用套接字  如果端口号被占用，执行就会失败，或者普通用户使用端口号小于1024的端口
+	assert(res!=-1);
+
+	listen(sockfd,5);//创建监听队列 int listen(int sockfd, int backlog);监听链接如果没有就会阻塞住
+
+	int epfd = epoll_create(10);//创建内核事件表，用efd指定
+	assert(epfd != -1);
+
+	struct epoll_event events[10];//定义了一个事件数组
+	epoll_add(epfd,sockfd);//添加事件
+
+	while(1)
+	{
+		int n = epoll_wait(epfd,events,10,5000);//n返回的是事件表里就绪的事件
+		if( n != -1)
+		{
+			perror("epoll_wait error\n");
+		}
+		else if(n==0)
+		{
+			printf("timeout\n");
+		}
+		else
+		{
+			int i = 0;
+			for(;i < n;i++)
+			{	
+				int fd = events[i].data.fd;
+				if( events[i].events & EPOLLIN )
+				{
+					if(fd == sockfd)
+					{
+						int len = sizeof(caddr);
+						int c = accept(sockfd,(struct sockaddr*)&caddr,&len);
+						if( c < 0 )
+						{
+							continue;
+						}
+						epoll_add(epfd,c);
+					}
+					else
+					{
+						char buff[128] = {0};
+						int res = recv(fd,buff,127,0);
+						if(  res == 0 )
+						{
+							epoll_del(epfd,fd);//先移除再关闭
+							close(fd);
+							printf("one client over\n");
+							continue;
+						}
+						printf("buff = %s\n",buff);
+						send(fd,"OK",2,0);
+					}
+				}
+			}
+		}
+	}
+}
+
+
+
+
+
+
